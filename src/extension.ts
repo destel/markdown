@@ -22,9 +22,11 @@ export const Strikethrough: MarkdownConfig = {
       let before = cx.slice(pos - 1, pos), after = cx.slice(pos + 2, pos + 3)
       let sBefore = /\s|^$/.test(before), sAfter = /\s|^$/.test(after)
       let pBefore = Punctuation.test(before), pAfter = Punctuation.test(after)
+      let allowTrailing = !!cx.parser.allowTrailingSpace?.has("Strikethrough")
       return cx.addDelimiter(StrikethroughDelim, pos, pos + 2,
                              !sAfter && (!pAfter || sBefore || pBefore),
-                             !sBefore && (!pBefore || sAfter || pAfter))
+                             allowTrailing ? (!pBefore || sAfter || pAfter)
+                             : !sBefore && (!pBefore || sAfter || pAfter))
     },
     after: "Emphasis"
   }]
