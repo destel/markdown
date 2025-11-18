@@ -1103,6 +1103,8 @@ export interface MarkdownConfig {
   parseInline?: readonly InlineParser[]
   /// Remove the named parsers from the configuration.
   remove?: readonly string[]
+  /// Allow right-flanking whitespace for the listed inline parsers.
+  allowTrailingSpace?: readonly string[]
   /// Add a parse wrapper (such as a [mixed-language
   /// parser](#common.parseMixed)) to this parser.
   wrap?: ParseWrapper
@@ -1139,7 +1141,9 @@ export class MarkdownParser extends Parser {
     /// @internal
     readonly inlineNames: readonly string[],
     /// @internal
-    readonly wrappers: readonly ParseWrapper[]
+    readonly wrappers: readonly ParseWrapper[],
+    /// @internal
+    readonly allowTrailingSpace: ReadonlySet<string> | null = null
   ) {
     super()
     for (let t of nodeSet.types) this.nodeTypes[t.name] = t.id
@@ -1160,6 +1164,7 @@ export class MarkdownParser extends Parser {
         blockNames = this.blockNames.slice(), inlineParsers = this.inlineParsers.slice(),
         inlineNames = this.inlineNames.slice(), endLeafBlock = this.endLeafBlock.slice(),
         wrappers = this.wrappers
+    let allowTrailingSpace = this.allowTrailingSpace
 
     if (nonEmpty(config.defineNodes)) {
       skipContextMarkup = Object.assign({}, skipContextMarkup)
@@ -1228,12 +1233,19 @@ export class MarkdownParser extends Parser {
       }
     }
 
+    if (nonEmpty(config.allowTrailingSpace)) {
+      let updated = allowTrailingSpace ? new Set(allowTrailingSpace) : new Set<string>()
+      for (let name of config.allowTrailingSpace!) updated.add(name)
+      allowTrailingSpace = updated
+    }
+
     if (config.wrap) wrappers = wrappers.concat(config.wrap)
 
     return new MarkdownParser(nodeSet,
                               blockParsers, leafBlockParsers, blockNames,
                               endLeafBlock, skipContextMarkup,
-                              inlineParsers, inlineNames, wrappers)
+                              inlineParsers, inlineNames, wrappers,
+                              allowTrailingSpace)
   }
 
   /// @internal
@@ -1280,6 +1292,7 @@ function resolveConfig(spec: MarkdownExtension): MarkdownConfig | null {
     parseBlock: conc(conf.parseBlock, rest.parseBlock),
     parseInline: conc(conf.parseInline, rest.parseInline),
     remove: conc(conf.remove, rest.remove),
+    allowTrailingSpace: conc(conf.allowTrailingSpace, rest.allowTrailingSpace),
     wrap: !wrapA ? wrapB : !wrapB ? wrapA :
       (inner, input, fragments, ranges) => wrapA!(wrapB!(inner, input, fragments, ranges), input, fragments, ranges)
   }
@@ -1481,7 +1494,9 @@ const DefaultInline: {[name: string]: (cx: InlineContext, next: number, pos: num
     let pBefore = Punctuation.test(before), pAfter = Punctuation.test(after)
     let sBefore = /\s|^$/.test(before), sAfter = /\s|^$/.test(after)
     let leftFlanking = !sAfter && (!pAfter || sBefore || pBefore)
-    let rightFlanking = !sBefore && (!pBefore || sAfter || pAfter)
+    let allowTrailing = !!cx.parser.allowTrailingSpace?.has("Emphasis")
+    let rightFlanking = allowTrailing ? (!pBefore || sAfter || pAfter)
+      : !sBefore && (!pBefore || sAfter || pAfter)
     let canOpen = leftFlanking && (next == 42 || !rightFlanking || pBefore)
     let canClose = rightFlanking && (next == 42 || !leftFlanking || pAfter)
     return cx.append(new InlineDelimiter(next == 95 ? EmphasisUnderscore : EmphasisAsterisk, start, pos,
