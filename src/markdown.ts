@@ -276,9 +276,14 @@ function inList(cx: BlockContext, type: Type) {
 }
 
 function isBulletList(line: Line, cx: BlockContext, breaking: boolean) {
-  return (line.next == 45 || line.next == 43 || line.next == 42 /* '-+*' */) &&
-    (line.pos == line.text.length - 1 || space(line.text.charCodeAt(line.pos + 1))) &&
-    (!breaking || inList(cx, Type.BulletList) || line.skipSpace(line.pos + 2) < line.text.length) ? 1 : -1
+  if (!(line.next == 45 || line.next == 43 || line.next == 42 /* '-+*' */)) return -1
+  // When requireSpaceAfterMarkers is true, don't allow EOL exception
+  const hasSpace = cx.parser.requireSpaceAfterMarkers
+    ? space(line.text.charCodeAt(line.pos + 1))
+    : (line.pos == line.text.length - 1 || space(line.text.charCodeAt(line.pos + 1)))
+  if (!hasSpace) return -1
+  if (breaking && !inList(cx, Type.BulletList) && line.skipSpace(line.pos + 2) >= line.text.length) return -1
+  return 1
 }
 
 function isOrderedList(line: Line, cx: BlockContext, breaking: boolean) {
@@ -298,11 +303,16 @@ function isOrderedList(line: Line, cx: BlockContext, breaking: boolean) {
   return pos + 1 - line.pos
 }
 
-function isAtxHeading(line: Line) {
+function isAtxHeading(line: Line, cx?: BlockContext) {
   if (line.next != 35 /* '#' */) return -1
   let pos = line.pos + 1
   while (pos < line.text.length && line.text.charCodeAt(pos) == 35) pos++
-  if (pos < line.text.length && line.text.charCodeAt(pos) != 32) return -1
+  // When requireSpaceAfterMarkers is true, require space (not just EOL)
+  if (cx?.parser.requireSpaceAfterMarkers) {
+    if (pos >= line.text.length || line.text.charCodeAt(pos) != 32) return -1
+  } else {
+    if (pos < line.text.length && line.text.charCodeAt(pos) != 32) return -1
+  }
   let size = pos - line.pos
   return size > 6 ? -1 : size
 }
@@ -475,7 +485,7 @@ const DefaultBlockParsers: {[name: string]: ((cx: BlockContext, line: Line) => B
   },
 
   ATXHeading(cx, line) {
-    let size = isAtxHeading(line)
+    let size = isAtxHeading(line, cx)
     if (size < 0) return false
     let off = line.pos, from = cx.lineStart + off
     let endOfSpace = skipSpaceBack(line.text, line.text.length, off), after = endOfSpace
@@ -621,7 +631,7 @@ const DefaultLeafBlocks: {[name: string]: (cx: BlockContext, leaf: LeafBlock) =>
 }
 
 const DefaultEndLeaf: readonly ((cx: BlockContext, line: Line) => boolean)[] = [
-  (_, line) => isAtxHeading(line) >= 0,
+  (cx, line) => isAtxHeading(line, cx) >= 0,
   (_, line) => isFencedCode(line) >= 0,
   (_, line) => isBlockquote(line) >= 0,
   (p, line) => isBulletList(line, p, true) >= 0,
@@ -1105,6 +1115,9 @@ export interface MarkdownConfig {
   remove?: readonly string[]
   /// Allow right-flanking whitespace for the listed inline parsers.
   allowTrailingSpace?: readonly string[]
+  /// When true, require a space after block markers (like `-` for lists
+  /// or `#` for headings) instead of accepting end-of-line.
+  requireSpaceAfterMarkers?: boolean
   /// Add a parse wrapper (such as a [mixed-language
   /// parser](#common.parseMixed)) to this parser.
   wrap?: ParseWrapper
@@ -1143,7 +1156,9 @@ export class MarkdownParser extends Parser {
     /// @internal
     readonly wrappers: readonly ParseWrapper[],
     /// @internal
-    readonly allowTrailingSpace: ReadonlySet<string> | null = null
+    readonly allowTrailingSpace: ReadonlySet<string> | null = null,
+    /// @internal
+    readonly requireSpaceAfterMarkers: boolean = false
   ) {
     super()
     for (let t of nodeSet.types) this.nodeTypes[t.name] = t.id
@@ -1165,6 +1180,7 @@ export class MarkdownParser extends Parser {
         inlineNames = this.inlineNames.slice(), endLeafBlock = this.endLeafBlock.slice(),
         wrappers = this.wrappers
     let allowTrailingSpace = this.allowTrailingSpace
+    let requireSpaceAfterMarkers = config.requireSpaceAfterMarkers ?? this.requireSpaceAfterMarkers
 
     if (nonEmpty(config.defineNodes)) {
       skipContextMarkup = Object.assign({}, skipContextMarkup)
@@ -1245,7 +1261,7 @@ export class MarkdownParser extends Parser {
                               blockParsers, leafBlockParsers, blockNames,
                               endLeafBlock, skipContextMarkup,
                               inlineParsers, inlineNames, wrappers,
-                              allowTrailingSpace)
+                              allowTrailingSpace, requireSpaceAfterMarkers)
   }
 
   /// @internal
@@ -1293,6 +1309,7 @@ function resolveConfig(spec: MarkdownExtension): MarkdownConfig | null {
     parseInline: conc(conf.parseInline, rest.parseInline),
     remove: conc(conf.remove, rest.remove),
     allowTrailingSpace: conc(conf.allowTrailingSpace, rest.allowTrailingSpace),
+    requireSpaceAfterMarkers: conf.requireSpaceAfterMarkers ?? rest.requireSpaceAfterMarkers,
     wrap: !wrapA ? wrapB : !wrapB ? wrapA :
       (inner, input, fragments, ranges) => wrapA!(wrapB!(inner, input, fragments, ranges), input, fragments, ranges)
   }
