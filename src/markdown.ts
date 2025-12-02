@@ -414,6 +414,7 @@ const DefaultBlockParsers: {[name: string]: ((cx: BlockContext, line: Line) => B
   },
 
   FencedCode(cx, line) {
+    if (cx.parser.onlyRootCodeFences && cx.depth > 1) return false
     let fenceEnd = isFencedCode(line)
     if (fenceEnd < 0) return false
     let from = cx.lineStart + line.pos, ch = line.next, len = fenceEnd - line.pos
@@ -1118,6 +1119,9 @@ export interface MarkdownConfig {
   /// When true, require a space after block markers (like `-` for lists
   /// or `#` for headings) instead of accepting end-of-line.
   requireSpaceAfterMarkers?: boolean
+  /// When true, only recognize fenced code blocks at root level (not inside
+  /// blockquotes or lists). Non-root backticks are treated as paragraphs.
+  onlyRootCodeFences?: boolean
   /// Add a parse wrapper (such as a [mixed-language
   /// parser](#common.parseMixed)) to this parser.
   wrap?: ParseWrapper
@@ -1158,7 +1162,9 @@ export class MarkdownParser extends Parser {
     /// @internal
     readonly allowTrailingSpace: ReadonlySet<string> | null = null,
     /// @internal
-    readonly requireSpaceAfterMarkers: boolean = false
+    readonly requireSpaceAfterMarkers: boolean = false,
+    /// @internal
+    readonly onlyRootCodeFences: boolean = false
   ) {
     super()
     for (let t of nodeSet.types) this.nodeTypes[t.name] = t.id
@@ -1181,6 +1187,7 @@ export class MarkdownParser extends Parser {
         wrappers = this.wrappers
     let allowTrailingSpace = this.allowTrailingSpace
     let requireSpaceAfterMarkers = config.requireSpaceAfterMarkers ?? this.requireSpaceAfterMarkers
+    let onlyRootCodeFences = config.onlyRootCodeFences ?? this.onlyRootCodeFences
 
     if (nonEmpty(config.defineNodes)) {
       skipContextMarkup = Object.assign({}, skipContextMarkup)
@@ -1261,7 +1268,7 @@ export class MarkdownParser extends Parser {
                               blockParsers, leafBlockParsers, blockNames,
                               endLeafBlock, skipContextMarkup,
                               inlineParsers, inlineNames, wrappers,
-                              allowTrailingSpace, requireSpaceAfterMarkers)
+                              allowTrailingSpace, requireSpaceAfterMarkers, onlyRootCodeFences)
   }
 
   /// @internal
@@ -1310,6 +1317,7 @@ function resolveConfig(spec: MarkdownExtension): MarkdownConfig | null {
     remove: conc(conf.remove, rest.remove),
     allowTrailingSpace: conc(conf.allowTrailingSpace, rest.allowTrailingSpace),
     requireSpaceAfterMarkers: conf.requireSpaceAfterMarkers ?? rest.requireSpaceAfterMarkers,
+    onlyRootCodeFences: conf.onlyRootCodeFences ?? rest.onlyRootCodeFences,
     wrap: !wrapA ? wrapB : !wrapB ? wrapA :
       (inner, input, fragments, ranges) => wrapA!(wrapB!(inner, input, fragments, ranges), input, fragments, ranges)
   }
