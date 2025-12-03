@@ -295,9 +295,14 @@ function isOrderedList(line: Line, cx: BlockContext, breaking: boolean) {
     next = line.text.charCodeAt(pos)
   }
   if (pos == line.pos || pos > line.pos + 9 ||
-      (next != 46 && next != 41 /* '.)' */) ||
-      (pos < line.text.length - 1 && !space(line.text.charCodeAt(pos + 1))) ||
-      breaking && !inList(cx, Type.OrderedList) &&
+      (next != 46 && next != 41 /* '.)' */))
+    return -1
+  // When requireSpaceAfterMarkers is true, don't allow EOL exception
+  const hasSpace = cx.parser.requireSpaceAfterMarkers
+    ? space(line.text.charCodeAt(pos + 1))
+    : (pos == line.text.length - 1 || space(line.text.charCodeAt(pos + 1)))
+  if (!hasSpace) return -1
+  if (breaking && !inList(cx, Type.OrderedList) &&
       (line.skipSpace(pos + 1) == line.text.length || pos > line.pos + 1 || line.next != 49 /* '1' */))
     return -1
   return pos + 1 - line.pos
