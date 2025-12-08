@@ -19,14 +19,17 @@ export const Strikethrough: MarkdownConfig = {
     name: "Strikethrough",
     parse(cx, next, pos) {
       if (next != 126 /* '~' */ || cx.char(pos + 1) != 126 || cx.char(pos + 2) == 126) return -1
+
       let before = cx.slice(pos - 1, pos), after = cx.slice(pos + 2, pos + 3)
       let sBefore = /\s|^$/.test(before), sAfter = /\s|^$/.test(after)
       let pBefore = Punctuation.test(before), pAfter = Punctuation.test(after)
-      let allowTrailing = !!cx.parser.allowTrailingSpace?.has("Strikethrough")
-      return cx.addDelimiter(StrikethroughDelim, pos, pos + 2,
-                             !sAfter && (!pAfter || sBefore || pBefore),
-                             allowTrailing ? (!pBefore || sAfter || pAfter)
-                             : !sBefore && (!pBefore || sAfter || pAfter))
+      let canOpen = !sAfter && (!pAfter || sBefore || pBefore)
+      // relaxedFormatting: allow trailing whitespace before closing markers
+      let canClose = cx.parser.relaxedFormatting
+        ? (!pBefore || sAfter || pAfter)
+        : !sBefore && (!pBefore || sAfter || pAfter)
+
+      return cx.addDelimiter(StrikethroughDelim, pos, pos + 2, canOpen, canClose)
     },
     after: "Emphasis"
   }]

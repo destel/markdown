@@ -1119,8 +1119,8 @@ export interface MarkdownConfig {
   parseInline?: readonly InlineParser[]
   /// Remove the named parsers from the configuration.
   remove?: readonly string[]
-  /// Allow right-flanking whitespace for the listed inline parsers.
-  allowTrailingSpace?: readonly string[]
+  /// When true, allow emphasis/strikethrough markers anywhere (no flanking rules).
+  relaxedFormatting?: boolean
   /// When true, require a space after block markers (like `-` for lists
   /// or `#` for headings) instead of accepting end-of-line.
   requireSpaceAfterMarkers?: boolean
@@ -1165,7 +1165,7 @@ export class MarkdownParser extends Parser {
     /// @internal
     readonly wrappers: readonly ParseWrapper[],
     /// @internal
-    readonly allowTrailingSpace: ReadonlySet<string> | null = null,
+    readonly relaxedFormatting: boolean = false,
     /// @internal
     readonly requireSpaceAfterMarkers: boolean = false,
     /// @internal
@@ -1190,7 +1190,7 @@ export class MarkdownParser extends Parser {
         blockNames = this.blockNames.slice(), inlineParsers = this.inlineParsers.slice(),
         inlineNames = this.inlineNames.slice(), endLeafBlock = this.endLeafBlock.slice(),
         wrappers = this.wrappers
-    let allowTrailingSpace = this.allowTrailingSpace
+    let relaxedFormatting = config.relaxedFormatting ?? this.relaxedFormatting
     let requireSpaceAfterMarkers = config.requireSpaceAfterMarkers ?? this.requireSpaceAfterMarkers
     let onlyRootCodeFences = config.onlyRootCodeFences ?? this.onlyRootCodeFences
 
@@ -1261,19 +1261,13 @@ export class MarkdownParser extends Parser {
       }
     }
 
-    if (nonEmpty(config.allowTrailingSpace)) {
-      let updated = allowTrailingSpace ? new Set(allowTrailingSpace) : new Set<string>()
-      for (let name of config.allowTrailingSpace!) updated.add(name)
-      allowTrailingSpace = updated
-    }
-
     if (config.wrap) wrappers = wrappers.concat(config.wrap)
 
     return new MarkdownParser(nodeSet,
                               blockParsers, leafBlockParsers, blockNames,
                               endLeafBlock, skipContextMarkup,
                               inlineParsers, inlineNames, wrappers,
-                              allowTrailingSpace, requireSpaceAfterMarkers, onlyRootCodeFences)
+                              relaxedFormatting, requireSpaceAfterMarkers, onlyRootCodeFences)
   }
 
   /// @internal
@@ -1320,7 +1314,7 @@ function resolveConfig(spec: MarkdownExtension): MarkdownConfig | null {
     parseBlock: conc(conf.parseBlock, rest.parseBlock),
     parseInline: conc(conf.parseInline, rest.parseInline),
     remove: conc(conf.remove, rest.remove),
-    allowTrailingSpace: conc(conf.allowTrailingSpace, rest.allowTrailingSpace),
+    relaxedFormatting: conf.relaxedFormatting ?? rest.relaxedFormatting,
     requireSpaceAfterMarkers: conf.requireSpaceAfterMarkers ?? rest.requireSpaceAfterMarkers,
     onlyRootCodeFences: conf.onlyRootCodeFences ?? rest.onlyRootCodeFences,
     wrap: !wrapA ? wrapB : !wrapB ? wrapA :
@@ -1520,15 +1514,18 @@ const DefaultInline: {[name: string]: (cx: InlineContext, next: number, pos: num
     if (next != 95 && next != 42) return -1
     let pos = start + 1
     while (cx.char(pos) == next) pos++
+
     let before = cx.slice(start - 1, start), after = cx.slice(pos, pos + 1)
     let pBefore = Punctuation.test(before), pAfter = Punctuation.test(after)
     let sBefore = /\s|^$/.test(before), sAfter = /\s|^$/.test(after)
     let leftFlanking = !sAfter && (!pAfter || sBefore || pBefore)
-    let allowTrailing = !!cx.parser.allowTrailingSpace?.has("Emphasis")
-    let rightFlanking = allowTrailing ? (!pBefore || sAfter || pAfter)
+    // relaxedFormatting: allow trailing whitespace before closing markers
+    let rightFlanking = cx.parser.relaxedFormatting
+      ? (!pBefore || sAfter || pAfter)
       : !sBefore && (!pBefore || sAfter || pAfter)
     let canOpen = leftFlanking && (next == 42 || !rightFlanking || pBefore)
     let canClose = rightFlanking && (next == 42 || !leftFlanking || pAfter)
+
     return cx.append(new InlineDelimiter(next == 95 ? EmphasisUnderscore : EmphasisAsterisk, start, pos,
                                          (canOpen ? Mark.Open : Mark.None) | (canClose ? Mark.Close : Mark.None)))
   },
